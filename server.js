@@ -16,38 +16,24 @@ if (!fs.existsSync("outputs")) {
     fs.mkdirSync("outputs");
 }
 
-// Função para quebrar o texto em várias linhas com base na largura da imagem
-const wrapText = async (text, font, fontSize, maxWidth) => {
+// Função para quebrar texto em múltiplas linhas
+const wrapText = (text, maxWidth, fontSize) => {
     const words = text.split(" ");
     let lines = [];
     let currentLine = "";
 
     for (let word of words) {
-        const testLine = currentLine ? `${currentLine} ${word}` : word;
-        
-        // Criar uma imagem temporária para medir o texto
-        const { width } = await sharp({
-            create: {
-                width: 1000, // Tamanho arbitrário para medir texto
-                height: 100,
-                channels: 4,
-                background: { r: 0, g: 0, b: 0, alpha: 0 },
-            },
-        })
-            .text(testLine, { font, fontSize })
-            .metadata();
+        let testLine = currentLine ? `${currentLine} ${word}` : word;
+        let testWidth = testLine.length * (fontSize / 2); // Estimativa do tamanho do texto
 
-        // Se o texto ultrapassar a largura máxima, quebramos a linha
-        if (width > maxWidth) {
+        if (testWidth > maxWidth) {
             lines.push(currentLine);
             currentLine = word;
         } else {
             currentLine = testLine;
         }
     }
-    if (currentLine) {
-        lines.push(currentLine); // Adiciona a última linha
-    }
+    lines.push(currentLine);
     return lines;
 };
 
@@ -68,35 +54,32 @@ app.post("/edit-image", upload.single("image"), async (req, res) => {
         const imageWidth = imageMetadata.width;
         const imageHeight = imageMetadata.height;
 
-        // Quebrar o texto em múltiplas linhas respeitando a largura da imagem
-        const lines = await wrapText(text, font, fontSz, imageWidth - xPos * 2); 
-
-        // Definir altura do SVG com base na quantidade de linhas
+        // Quebrar o texto em linhas para caber na imagem
+        const lines = wrapText(text, imageWidth - xPos * 2, fontSz);
         const lineHeight = fontSz * 1.2;
-        const requiredHeight = lines.length * lineHeight + yPos; // Altura do SVG cresce conforme as linhas
+        const requiredHeight = lines.length * lineHeight + yPos;
 
-        // Criar um SVG dinâmico que cresce conforme a quantidade de texto
-        let svgText = `<svg width="${imageWidth}" height="${requiredHeight}">`;
+        // Criar o SVG ajustando a altura conforme necessário
+        let svgText = `<svg width="${imageWidth}" height="${Math.max(requiredHeight, imageHeight)}">`;
         let currentY = yPos;
 
         for (let line of lines) {
             svgText += `<text x="${xPos}" y="${currentY}" font-size="${fontSz}" fill="${color}" font-family="${font}">${line}</text>`;
-            currentY += lineHeight; // Move para a próxima linha
+            currentY += lineHeight;
         }
-
         svgText += `</svg>`;
 
-        // Compor a imagem original com o SVG de texto
+        // Criar a imagem final com o texto sobreposto
         await sharp(imagePath)
-            .extend({ // Garante que a imagem seja expandida se necessário
+            .extend({
                 top: 0,
                 bottom: requiredHeight > imageHeight ? requiredHeight - imageHeight : 0,
                 left: 0,
                 right: 0,
-                background: { r: 0, g: 0, b: 0, alpha: 0 }, // Fundo transparente
+                background: { r: 0, g: 0, b: 0, alpha: 0 },
             })
             .composite([{
-                input: Buffer.from(svgText),
+                input: Buffer.from(svgText, "utf-8"),
                 top: 0,
                 left: 0
             }])
